@@ -1,0 +1,12 @@
+#gf-trello label {
+float: left;
+width: 150px;
+}
+
+#gf-trello .input {
+width: 450px;
+}
+
+#gf-trello ol li {
+list-style: decimal;
+}
