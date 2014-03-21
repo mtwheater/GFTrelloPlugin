@@ -84,6 +84,8 @@ class Trello
      */
     protected $lastError;
 
+    protected $multi;
+
     /**
      * __construct
      *
@@ -95,7 +97,6 @@ class Trello
      */
     public function __construct($consumer_key, $shared_secret = null, $token = null, $oauth_secret = null)
     {
-
         // CURL is required in order for this extension to work
         if (!function_exists('curl_init')) {
             throw new \Exception('CURL is required for php-trello');
@@ -111,6 +112,15 @@ class Trello
         $this->shared_secret = $shared_secret;
         $this->token = $token;
         $this->oauth_secret = $oauth_secret;
+        $this->multi = curl_multi_init();
+    }
+
+    public function __destruct() {
+        $running = 1;
+        do {
+            curl_multi_exec($this->multi, $running);
+            curl_multi_select($this->multi);
+        } while ($running > 0);
     }
 
     /**
@@ -351,7 +361,7 @@ class Trello
     public function rest($method)
     {
         $args = array_slice(func_get_args(), 1);
-        extract($this->parseRestArgs($args)); /* path, params */
+        extract($this->parseRestArgs($args)); /* path, params, curlOpts */
 
         $restData = array();
         if ($this->consumer_key && !$this->shared_secret) {
@@ -367,11 +377,16 @@ class Trello
 
         // Perform the CURL query
         $ch = curl_init();
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_USERAGENT, "php-trello/$this->version");
-        curl_setopt($ch, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+        $defaultOpts = array(
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_TIMEOUT => 10,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_USERAGENT => "php-trello/$this->version",
+            CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS
+        );
+
+        $opts = $curlOpts + $defaultOpts;
+        curl_setopt_array($ch, $opts);
 
         switch ($method) {
             case 'GET':
@@ -400,6 +415,16 @@ class Trello
         curl_setopt($ch, CURLOPT_URL, $url);
 
         // Grab the response from Trello
+        if ($multi) {
+            curl_multi_add_handle($this->multi,$ch);
+            do {
+                curl_multi_exec($this->multi, $running);
+                curl_multi_select($this->multi);
+            } while ($running > 10);
+
+            return true;
+        }
+
         $responseBody = curl_exec($ch);
         if (!$responseBody) {
 
@@ -463,6 +488,8 @@ class Trello
         $opts = array(
             'path' => '',
             'params' => array(),
+            'curlOpts' => array(),
+            'multi' => false,
         );
 
         if (!empty($args[0])) {
@@ -470,6 +497,12 @@ class Trello
         }
         if (!empty($args[1])) {
             $opts['params'] = $args[1];
+        }
+        if (!empty($args[2])) {
+            $opts['curlOpts'] = $args[2];
+        }
+        if (!empty($args[3])) {
+            $opts['multi'] = $args[3];
         }
 
         return $opts;
